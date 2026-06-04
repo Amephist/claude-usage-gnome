@@ -1,0 +1,7 @@
+{
+  "uuid": "claude-usage@amephist",
+  "name": "Claude Usage",
+  "description": "Claude Code token usage and consumption rate in the panel",
+  "version": 1,
+  "shell-version": ["46", "47", "48", "49", "50", "51"]
+}
