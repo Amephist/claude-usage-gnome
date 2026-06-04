@@ -3,6 +3,7 @@
 
 import json
 import glob
+import math
 import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -40,6 +41,23 @@ def last_thursday_4am():
     if reset > now:
         reset -= timedelta(weeks=1)
     return reset
+
+
+def current_period_start(cfg, period_hours):
+    """Return the start of the current fixed period using a known anchor reset time.
+    Falls back to rolling window if no anchor is configured."""
+    anchor_str = cfg.get("period_anchor_utc")
+    if not anchor_str:
+        return datetime.now() - timedelta(hours=period_hours)
+    try:
+        anchor_utc = datetime.fromisoformat(anchor_str)
+        now_utc = datetime.now(timezone.utc)
+        elapsed = (now_utc - anchor_utc).total_seconds()
+        periods_elapsed = math.floor(elapsed / (period_hours * 3600))
+        start_utc = anchor_utc + timedelta(hours=period_hours * periods_elapsed)
+        return start_utc.astimezone().replace(tzinfo=None)
+    except Exception:
+        return datetime.now() - timedelta(hours=period_hours)
 
 
 def parse_iso(ts_str):
@@ -130,8 +148,8 @@ def main():
     # Load all messages since week start (covers both period and weekly windows)
     all_msgs = read_messages(since_dt=week_start)
 
-    # Period window: last N hours (rolling)
-    period_start = now - timedelta(hours=period_hours)
+    # Period window: fixed, anchored to known reset time (or rolling fallback)
+    period_start = current_period_start(cfg, period_hours)
     period_msgs = [m for m in all_msgs if m["ts"] >= period_start]
 
     # Weekly window: since last Thursday 4am
@@ -146,8 +164,9 @@ def main():
     weekly_stats = sum_tokens(weekly_msgs)
     last_1h_stats = sum_tokens(last_1h)
 
-    # Rate: use 6h window or whatever is available
-    rate_msgs = last_6h or last_1h or period_msgs
+    # Rate: use 6h window clipped to current period start
+    rate_start = max(now_naive - timedelta(hours=6), period_start)
+    rate_msgs = [m for m in all_msgs if m["ts"] >= rate_start] or period_msgs
     if rate_msgs:
         oldest = min(m["ts"] for m in rate_msgs)
         window_h = max((now_naive - oldest).total_seconds() / 3600, 1 / 60)
