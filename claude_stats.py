@@ -13,12 +13,12 @@ PROJECTS_DIR = CLAUDE_DIR / "projects"
 STATS_CACHE = CLAUDE_DIR / "stats-cache.json"
 CONFIG_FILE = CLAUDE_DIR / "usage-widget.json"
 
-# Default limits — calibrate these for your account via ~/.claude/usage-widget.json.
-# The actual limits depend on your Claude plan. Run the calibration workflow
-# (see README) to infer them from the percentages shown on claude.ai.
-DEFAULT_PERIOD_LIMIT = 2_000_000
+# Inferred limits (June 4 2026):
+#   Period (~5h window): ~2.26M tokens
+#   Weekly (resets Thu 4am local): ~22.2M tokens
+DEFAULT_PERIOD_LIMIT = 2_260_000
 DEFAULT_PERIOD_HOURS = 5
-DEFAULT_WEEKLY_LIMIT = 20_000_000
+DEFAULT_WEEKLY_LIMIT = 22_200_000
 WEEK_RESET_DAY = 3   # Thursday (Mon=0)
 WEEK_RESET_HOUR = 4  # 4am local
 
@@ -186,6 +186,16 @@ def main():
     except Exception:
         pass
 
+    label_mode = cfg.get("label_mode", "raw")  # "raw" | "pct"
+    rate_fmt = fmt(rate_per_hour)
+    if label_mode == "pct":
+        panel_label = f"◆ {round(period_pct)}%  {rate_fmt}/h  |w {round(weekly_pct)}%"
+    else:
+        panel_label = (
+            f"◆ {fmt(period_used)}/{fmt(period_limit)}  {rate_fmt}/h"
+            f"  |w {fmt(weekly_used)}/{fmt(weekly_limit)}"
+        )
+
     result = {
         "period": {**period_stats, "limit": period_limit, "pct": round(period_pct, 1),
                    "remaining": period_remaining, "hours": round(hours_in_period, 1),
@@ -196,6 +206,8 @@ def main():
                    "eta_hours": round(eta_weekly_h, 1) if eta_weekly_h else None},
         "last_1h": last_1h_stats,
         "rate_per_hour": int(rate_per_hour),
+        "label_mode": label_mode,
+        "panel_label": panel_label,
         "week_start": week_start.isoformat(),
         "daily_history": daily_history,
         "fmt": {
@@ -205,7 +217,7 @@ def main():
             "weekly_used": fmt(weekly_used),
             "weekly_limit": fmt(weekly_limit),
             "weekly_remaining": fmt(weekly_remaining),
-            "rate": fmt(rate_per_hour),
+            "rate": rate_fmt,
             "last_1h": fmt(last_1h_stats["effective"]),
             "output_period": fmt(period_stats["output"]),
         },

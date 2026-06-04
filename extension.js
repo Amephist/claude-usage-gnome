@@ -9,6 +9,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const REFRESH_SECONDS = 30;
+const CONFIG_PATH = GLib.get_home_dir() + '/.claude/usage-widget.json';
 
 const ClaudeIndicator = GObject.registerClass(
 class ClaudeIndicator extends PanelMenu.Button {
@@ -70,6 +71,10 @@ class ClaudeIndicator extends PanelMenu.Button {
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
+        this._toggleItem = new PopupMenu.PopupMenuItem('⇄  Modo: raw');
+        this._toggleItem.connect('activate', () => this._toggleMode());
+        this.menu.addMenuItem(this._toggleItem);
+
         let refreshItem = new PopupMenu.PopupMenuItem('↻  Actualizar ahora');
         refreshItem.connect('activate', () => this._refresh());
         this.menu.addMenuItem(refreshItem);
@@ -112,8 +117,8 @@ class ClaudeIndicator extends PanelMenu.Button {
         const p = s.period;
         const w = s.weekly;
 
-        // Panel label: período y semanal
-        this._label.set_text(`◆ ${f.period_used}/${f.period_limit}  ${f.rate}/h  |w ${f.weekly_used}/${f.weekly_limit}`);
+        this._label.set_text(s.panel_label);
+        this._toggleItem.label.set_text(`⇄  Modo: ${s.label_mode === 'pct' ? 'porcentaje → raw' : 'raw → porcentaje'}`);
 
         // Period
         this._periodUsedItem.label.set_text(`  Usado:     ${f.period_used}  (${p.pct}%)`);
@@ -153,6 +158,23 @@ class ClaudeIndicator extends PanelMenu.Button {
         }
 
         this._updatedItem.label.set_text(`Actualizado: ${new Date().toLocaleTimeString()}`);
+    }
+
+    _toggleMode() {
+        try {
+            const file = Gio.File.new_for_path(CONFIG_PATH);
+            let cfg = {};
+            try {
+                const [, contents] = file.load_contents(null);
+                cfg = JSON.parse(new TextDecoder().decode(contents));
+            } catch (_e) {}
+            cfg.label_mode = (cfg.label_mode === 'pct') ? 'raw' : 'pct';
+            file.replace_contents(
+                new TextEncoder().encode(JSON.stringify(cfg, null, 2)),
+                null, false, Gio.FileCreateFlags.NONE, null,
+            );
+        } catch (_e) {}
+        this._refresh();
     }
 
     _bar(pct, width) {
