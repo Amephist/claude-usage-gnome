@@ -43,9 +43,8 @@ def last_thursday_4am():
     return reset
 
 
-def current_period_start(cfg, period_hours):
-    """Return the start of the current fixed period using a known anchor reset time.
-    Falls back to rolling window if no anchor is configured."""
+def anchor_period_start(cfg, period_hours):
+    """Compute period start from stored anchor using fixed-grid math."""
     anchor_str = cfg.get("period_anchor_utc")
     if not anchor_str:
         return datetime.now() - timedelta(hours=period_hours)
@@ -58,6 +57,42 @@ def current_period_start(cfg, period_hours):
         return start_utc.astimezone().replace(tzinfo=None)
     except Exception:
         return datetime.now() - timedelta(hours=period_hours)
+
+
+def current_period_start(cfg, period_hours, msgs=None):
+    """Return the start of the current period.
+
+    Uses anchor math as baseline, then validates against actual activity gaps.
+    If the anchor-computed start falls inside a real gap >= period_hours, the
+    anchor is correct. If there is a gap >= period_hours but the anchor doesn't
+    land in it, the anchor is stale — fall back to first token after the most
+    recent such gap as a proxy for the new period start.
+    """
+    math_start = anchor_period_start(cfg, period_hours)
+
+    if not msgs:
+        return math_start
+
+    period_sec = period_hours * 3600
+    sorted_msgs = sorted(msgs, key=lambda m: m["ts"])
+
+    # Search backwards for the most recent gap >= period_hours
+    for i in range(len(sorted_msgs) - 1, 0, -1):
+        before = sorted_msgs[i - 1]["ts"]
+        after  = sorted_msgs[i]["ts"]
+        gap_sec = (after - before).total_seconds()
+        if gap_sec < period_sec:
+            continue
+        # Found a gap big enough to contain a period reset.
+        if before < math_start <= after:
+            # Anchor math lands inside the gap — anchor is consistent.
+            return math_start
+        # Anchor doesn't land in this gap — it's stale.
+        # Best proxy: first token after the gap.
+        return after
+
+    # No long gap found — trust the anchor math.
+    return math_start
 
 
 def parse_iso(ts_str):
@@ -148,8 +183,8 @@ def main():
     # Load all messages since week start (covers both period and weekly windows)
     all_msgs = read_messages(since_dt=week_start)
 
-    # Period window: fixed, anchored to known reset time (or rolling fallback)
-    period_start = current_period_start(cfg, period_hours)
+    # Period window: anchor math validated against real activity gaps
+    period_start = current_period_start(cfg, period_hours, all_msgs)
     period_msgs = [m for m in all_msgs if m["ts"] >= period_start]
 
     # Weekly window: since last Thursday 4am
